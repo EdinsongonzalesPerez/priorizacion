@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matriz de Priorización Interactiva con IA</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- html2pdf para exportar -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <style>
+        /* Estilos base para las notas */
+        .note {
+            position: absolute;
+            transition: transform 0.1s ease, box-shadow 0.1s ease, top 0.5s ease-in-out, left 0.5s ease-in-out;
+            box-shadow: 3px 4px 10px rgba(0, 0, 0, 0.2);
+            pointer-events: auto;
+        }
+        .note.dragging {
+            transition: transform 0.1s ease, box-shadow 0.1s ease; /* Sin delay de movimiento al arrastrar manualmente */
+        }
+        .note textarea {
+            font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif;
+            line-height: 1.4;
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        .note textarea::-webkit-scrollbar {
+            display: none;
+        }
+        /* Patrón de cuadrícula de fondo */
+        .bg-grid {
+            background-size: 30px 30px;
+            background-image: 
+                linear-gradient(to right, rgba(0, 0, 0, 0.02) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(0, 0, 0, 0.02) 1px, transparent 1px);
+        }
+        /* Ocultar herramientas al exportar a PDF */
+        .exporting .note-toolbar, .exporting .no-print {
+            display: none !important;
+        }
+        .exporting textarea {
+            border: none !important;
+            resize: none !important;
+        }
+        
+        /* Animaciones para el modal */
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .modal-bg { animation: fadeIn 0.2s ease-out forwards; }
+        .modal-content { animation: slideUp 0.3s ease-out forwards; }
+    </style>
+</head>
+<body class="bg-slate-800 h-screen flex flex-col font-sans overflow-hidden text-slate-800">
+
+    <!-- BARRA DE HERRAMIENTAS GLOBAL -->
+    <header class="bg-white px-6 py-4 flex justify-between items-center shadow-md z-50 flex-shrink-0 no-print">
+        <div>
+            <h1 class="text-2xl font-bold text-slate-800"><i class="fas fa-th-large text-emerald-600 mr-2"></i> Dinámica: Matriz de Priorización</h1>
+            <p class="text-sm text-slate-500">Evalúa tus ideas según el Impacto que generan y el Esfuerzo que requieren.</p>
+        </div>
+        <div class="flex gap-3">
+            <button onclick="openBrainstormModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded shadow transition-colors flex items-center gap-2">
+                <span class="text-xl">✨</span> Lluvia de Ideas
+            </button>
+            <button onclick="addNote()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded shadow transition-colors flex items-center gap-2">
+                <i class="fas fa-plus"></i> Añadir Idea
+            </button>
+            <button onclick="exportToPDF()" class="bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-semibold py-2 px-4 rounded shadow-sm transition-colors flex items-center gap-2">
+                <i class="fas fa-file-pdf text-red-500"></i> Descargar PDF
+            </button>
+        </div>
+    </header>
+
+    <!-- ÁREA DE TRABAJO -->
+    <main class="flex-grow overflow-auto p-8 flex justify-center items-start">
+        
+        <div id="pdf-canvas" class="bg-white relative shadow-2xl flex flex-col" style="width: 1122px; height: 793px; min-width: 1122px; min-height: 793px;">
+            
+            <div class="px-8 py-6 border-b-2 border-slate-200 flex justify-between items-start bg-white z-10 relative">
+                <div>
+                    <h2 class="text-3xl font-extrabold text-slate-800 uppercase tracking-wide">Matriz de Priorización de Ideas</h2>
+                    <p class="text-slate-500 mt-1">¿Qué ideas debemos implementar primero? (Impacto vs Esfuerzo)</p>
+                </div>
+                <div class="w-1/3">
+                    <label class="block text-sm font-bold text-slate-700 mb-1"><i class="fas fa-users mr-1"></i> Integrantes del Equipo:</label>
+                    <input type="text" class="w-full border-b-2 border-slate-300 bg-slate-50 p-2 outline-none focus:border-emerald-500 transition-colors" placeholder="Ej: Ana López, Carlos Ruiz...">
+                </div>
+            </div>
+
+            <div class="flex-grow grid grid-cols-2 grid-rows-2 bg-grid z-10 relative p-6 pl-20 pb-20 gap-4">
+                
+                <!-- EJE Y (Vertical - Impacto) -->
+                <div class="absolute left-10 top-6 bottom-10 w-1 bg-slate-400 pointer-events-none z-20 flex flex-col items-center justify-center">
+                    <i class="fas fa-caret-up text-slate-400 text-4xl absolute -top-[17px] leading-none"></i>
+                    <div class="absolute -top-4 left-4 text-4xl font-black text-slate-400">+</div>
+                    <div class="absolute -rotate-90 origin-center text-lg font-extrabold text-slate-500 tracking-widest uppercase bg-white/90 px-4 py-1 rounded-full shadow-sm border border-slate-100">Impacto</div>
+                    <div class="absolute bottom-4 left-4 text-5xl font-black text-slate-400">-</div>
+                </div>
+
+                <!-- EJE X (Horizontal - Esfuerzo) -->
+                <div class="absolute left-10 bottom-10 right-6 h-1 bg-slate-400 pointer-events-none z-20 flex items-center justify-center">
+                    <i class="fas fa-caret-right text-slate-400 text-4xl absolute -right-[13px] leading-none"></i>
+                    <div class="absolute left-4 bottom-4 text-5xl font-black text-slate-400">-</div>
+                    <div class="text-lg font-extrabold text-slate-500 tracking-widest uppercase bg-white/90 px-4 py-1 rounded-full shadow-sm border border-slate-100 z-10">Esfuerzo</div>
+                    <div class="absolute right-4 bottom-4 text-4xl font-black text-slate-400">+</div>
+                </div>
+
+                <!-- CUADRANTE 1: Alto Impacto / Bajo Esfuerzo -->
+                <div class="rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 relative overflow-hidden flex items-center justify-center">
+                    <div class="text-center opacity-[0.15] pointer-events-none select-none">
+                        <i class="fas fa-bolt text-6xl mb-3 text-emerald-800"></i>
+                        <h3 class="text-4xl font-black text-emerald-900 uppercase tracking-widest">Hacer Ya</h3>
+                        <p class="text-lg font-bold text-emerald-800 mt-1 uppercase tracking-widest">Éxitos Rápidos</p>
+                    </div>
+                </div>
+
+                <!-- CUADRANTE 2: Alto Impacto / Alto Esfuerzo -->
+                <div class="rounded-xl border-2 border-dashed border-blue-200 bg-blue-50/40 relative overflow-hidden flex items-center justify-center">
+                    <div class="text-center opacity-[0.15] pointer-events-none select-none">
+                        <i class="fas fa-hourglass-half text-6xl mb-3 text-blue-800"></i>
+                        <h3 class="text-4xl font-black text-blue-900 uppercase tracking-widest">Planificar</h3>
+                        <p class="text-lg font-bold text-blue-800 mt-1 uppercase tracking-widest">Grandes Proyectos</p>
+                    </div>
+                </div>
+
+                <!-- CUADRANTE 3: Bajo Impacto / Bajo Esfuerzo -->
+                <div class="rounded-xl border-2 border-dashed border-yellow-200 bg-yellow-50/40 relative overflow-hidden flex items-center justify-center">
+                    <div class="text-center opacity-[0.15] pointer-events-none select-none">
+                        <i class="fas fa-folder-open text-6xl mb-3 text-yellow-800"></i>
+                        <h3 class="text-4xl font-black text-yellow-900 uppercase tracking-widest">Completar</h3>
+                        <p class="text-lg font-bold text-yellow-800 mt-1 uppercase tracking-widest">Tareas de Relleno</p>
+                    </div>
+                </div>
+
+                <!-- CUADRANTE 4: Bajo Impacto / Alto Esfuerzo -->
+                <div class="rounded-xl border-2 border-dashed border-red-200 bg-red-50/40 relative overflow-hidden flex items-center justify-center">
+                    <div class="text-center opacity-[0.15] pointer-events-none select-none">
+                        <i class="fas fa-trash-alt text-6xl mb-3 text-red-800"></i>
+                        <h3 class="text-4xl font-black text-red-900 uppercase tracking-widest">Descartar</h3>
+                        <p class="text-lg font-bold text-red-800 mt-1 uppercase tracking-widest">Pérdidas de Tiempo</p>
+                    </div>
+                </div>
+
+            </div>
+
+            <div id="notes-layer" class="absolute inset-0 z-50 pointer-events-none" style="overflow: visible;">
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Modales UI (Personalizados para evitar usar alert() o prompt() bloqueantes) -->
+    <div id="custom-modal" class="hidden fixed inset-0 z-[100] modal-bg bg-slate-900/60 flex justify-center items-center backdrop-blur-sm">
+        <div class="modal-content bg-white rounded-xl shadow-2xl max-w-md w-full p-6 m-4 relative">
+            <button onclick="closeModal('custom-modal')" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button>
+            <h3 id="modal-title" class="text-xl font-bold text-slate-800 mb-2">Mensaje</h3>
+            <p id="modal-message" class="text-slate-600 mb-6"></p>
+            <div class="flex justify-end">
+                <button onclick="closeModal('custom-modal')" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold py-2 px-6 rounded transition-colors">Cerrar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Lluvia de Ideas -->
+    <div id="brainstorm-modal" class="hidden fixed inset-0 z-[100] modal-bg bg-slate-900/60 flex justify-center items-center backdrop-blur-sm">
+        <div class="modal-content bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 m-4 relative">
+            <button onclick="closeModal('brainstorm-modal')" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button>
+            <h3 class="text-2xl font-bold text-indigo-700 mb-2 flex items-center gap-2"><span class="text-2xl">✨</span> Generar Ideas (IA)</h3>
+            <p class="text-slate-600 mb-4 text-sm">Describe brevemente el problema que quieres resolver o la meta de tu proyecto. La IA propondrá 4 ideas y las ubicará en la matriz.</p>
+            
+            <textarea id="brainstorm-input" rows="3" class="w-full border-2 border-slate-200 rounded-lg p-3 outline-none focus:border-indigo-500 transition-colors mb-4 resize-none" placeholder="Ej: Queremos mejorar la participación de los alumnos en clase..."></textarea>
+            
+            <div class="flex justify-end gap-2">
+                <button onclick="closeModal('brainstorm-modal')" class="bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold py-2 px-4 rounded transition-colors">Cancelar</button>
+                <button id="brainstorm-btn" onclick="runBrainstorm()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-6 rounded transition-colors flex items-center gap-2">
+                    <i class="fas fa-magic"></i> Generar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // CONFIGURACIÓN API GEMINI
+        const apiKey = ""; // Se inyecta en el entorno de ejecución
+        const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+        const notesLayer = document.getElementById('notes-layer');
+        let zIndexCounter = 100;
+
+        // POSICIONES APROXIMADAS DE LOS CUADRANTES
+        const quadrants = {
+            "ALTO_BAJO": { left: 260, top: 220 }, // 1. Hacer Ya (Alto Imp, Bajo Esf)
+            "ALTO_ALTO": { left: 810, top: 220 }, // 2. Planificar (Alto Imp, Alto Esf)
+            "BAJO_BAJO": { left: 260, top: 560 }, // 3. Tareas de relleno (Bajo Imp, Bajo Esf)
+            "BAJO_ALTO": { left: 810, top: 560 }  // 4. Descartar (Bajo Imp, Alto Esf)
+        };
+
+        // UI Modales
+        function showModal(title, message) {
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-message').innerText = message;
+            document.getElementById('custom-modal').classList.remove('hidden');
+        }
+        function closeModal(modalId) {
+            document.getElementById(modalId).classList.add('hidden');
+            if(modalId === 'brainstorm-modal') document.getElementById('brainstorm-input').value = '';
+        }
+        function openBrainstormModal() {
+            document.getElementById('brainstorm-modal').classList.remove('hidden');
+            document.getElementById('brainstorm-input').focus();
+        }
+
+        // LÓGICA RETRY API (Exponential Backoff)
+        async function fetchWithRetry(url, payload, retries = 5) {
+            const delays = [1000, 2000, 4000, 8000, 16000];
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    return await response.json();
+                } catch (error) {
+                    if (i === retries - 1) throw error;
+                    await new Promise(res => setTimeout(res, delays[i]));
+                }
+            }
+        }
+
+        // FUNCIÓN: LLUVIA DE IDEAS (✨)
+        async function runBrainstorm() {
+            const input = document.getElementById('brainstorm-input').value.trim();
+            if (!input) return showModal('Error', 'Por favor, escribe un problema o meta para generar ideas.');
+            
+            const btn = document.getElementById('brainstorm-btn');
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Pensando...';
+            btn.disabled = true;
+
+            const prompt = `Actúa como un experto en innovación. El problema o meta es: "${input}". 
+            Genera exactamente 4 ideas creativas y accionables para abordarlo.
+            Para cada idea, evalúa su IMPACTO (ALTO o BAJO) y su ESFUERZO/Costo de implementación (ALTO o BAJO).
+            Asegúrate de que haya diversidad en los cuadrantes si es posible.`;
+
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            ideas: {
+                                type: "ARRAY",
+                                items: {
+                                    type: "OBJECT",
+                                    properties: {
+                                        texto: { type: "STRING" },
+                                        impacto: { type: "STRING", enum: ["ALTO", "BAJO"] },
+                                        esfuerzo: { type: "STRING", enum: ["ALTO", "BAJO"] }
+                                    },
+                                    required: ["texto", "impacto", "esfuerzo"]
+                                }
+                            }
+                        },
+                        required: ["ideas"]
+                    }
+                }
+            };
+
+            try {
+                const data = await fetchWithRetry(geminiApiUrl, payload);
+                const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!resultText) throw new Error("Respuesta vacía de la API");
+                
+                const resultObj = JSON.parse(resultText);
+                closeModal('brainstorm-modal');
+
+                // Colores predeterminados para las 4 ideas generadas
+                const colors = ['bg-yellow-200', 'bg-blue-200', 'bg-pink-200', 'bg-purple-200'];
+
+                resultObj.ideas.forEach((idea, index) => {
+                    setTimeout(() => {
+                        const quadKey = `${idea.impacto}_${idea.esfuerzo}`;
+                        const pos = quadrants[quadKey] || quadrants["ALTO_BAJO"];
+                        
+                        // Agregar nota con su respectivo color y posición
+                        addNote(idea.texto, pos.left, pos.top, colors[index % colors.length]);
+                    }, index * 400); // Añadir pequeño retraso para efecto visual
+                });
+
+            } catch (error) {
+                console.error("Error AI:", error);
+                showModal('Ups...', 'Hubo un problema al contactar con la inteligencia artificial. Inténtalo de nuevo.');
+            } finally {
+                btn.innerHTML = '<i class="fas fa-magic"></i> Generar';
+                btn.disabled = false;
+            }
+        }
+
+        // FUNCIÓN: AUTO-EVALUAR NOTA (✨)
+        async function autoEvaluateNote(noteEl, textarea, aiBtn) {
+            const text = textarea.value.trim();
+            if (!text) return showModal('Nota vacía', 'Escribe una idea en la nota antes de pedirle a la IA que la evalúe.');
+
+            aiBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            aiBtn.disabled = true;
+
+            const prompt = `Lee esta idea de proyecto/tarea: "${text}".
+            Clasifícala estrictamente en una matriz de priorización evaluando su IMPACTO (ALTO o BAJO) y el ESFUERZO/Complejidad para realizarla (ALTO o BAJO).
+            Brinda también una razón muy corta (1 frase) del por qué.`;
+
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: {
+                        type: "OBJECT",
+                        properties: {
+                            impacto: { type: "STRING", enum: ["ALTO", "BAJO"] },
+                            esfuerzo: { type: "STRING", enum: ["ALTO", "BAJO"] },
+                            razon: { type: "STRING" }
+                        },
+                        required: ["impacto", "esfuerzo", "razon"]
+                    }
+                }
+            };
+
+            try {
+                const data = await fetchWithRetry(geminiApiUrl, payload);
+                const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (!resultText) throw new Error("Respuesta vacía");
+
+                const result = JSON.parse(resultText);
+                
+                // Mover nota al cuadrante correcto
+                const quadKey = `${result.impacto}_${result.esfuerzo}`;
+                if (quadrants[quadKey]) {
+                    // Animamos al centroide del cuadrante con un poco de aleatoriedad
+                    const randomOffsetX = Math.floor(Math.random() * 80) - 40;
+                    const randomOffsetY = Math.floor(Math.random() * 60) - 30;
+                    
+                    // Aseguramos que CSS transitions se apliquen temporalmente
+                    noteEl.classList.remove('dragging');
+                    noteEl.style.left = `${quadrants[quadKey].left + randomOffsetX}px`;
+                    noteEl.style.top = `${quadrants[quadKey].top + randomOffsetY}px`;
+                    
+                    // Pequeño indicador de éxito visual en la nota
+                    textarea.value = `[IA: ${result.impacto} Imp / ${result.esfuerzo} Esf]\n${text}`;
+                }
+            } catch(error) {
+                console.error("Eval Error:", error);
+                showModal('Error de IA', 'No se pudo clasificar esta nota automáticamente.');
+            } finally {
+                aiBtn.innerHTML = '✨';
+                aiBtn.disabled = false;
+            }
+        }
+
+
+        // CREACIÓN DE NOTAS
+        function addNote(text = '', forceLeft = null, forceTop = null, forceColor = 'bg-yellow-200') {
+            const note = document.createElement('div');
+            note.className = `note ${forceColor} w-44 h-32 flex flex-col rounded border border-black/5`;
+            
+            // Posicionar
+            if (forceLeft !== null && forceTop !== null) {
+                // Posición exacta dictada (usado por la IA de lluvia de ideas)
+                const randomOffset = Math.floor(Math.random() * 40) - 20; 
+                note.style.left = `${forceLeft + randomOffset}px`; 
+                note.style.top = `${forceTop + randomOffset}px`;
+            } else {
+                // Al centro por defecto (usuario manual)
+                const randomOffset = Math.floor(Math.random() * 60) - 30; 
+                note.style.left = `480px`; 
+                note.style.top = `350px`;
+                note.style.transform = `translate(${randomOffset}px, ${randomOffset}px)`;
+            }
+            note.style.zIndex = ++zIndexCounter;
+
+            note.innerHTML = `
+                <div class="note-toolbar w-full h-7 cursor-grab bg-black/5 flex justify-between items-center px-2 group">
+                    <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button class="color-btn w-3.5 h-3.5 rounded-full bg-yellow-200 border border-black/20 hover:scale-110 transition-transform" data-color="bg-yellow-200" title="Amarillo"></button>
+                        <button class="color-btn w-3.5 h-3.5 rounded-full bg-blue-200 border border-black/20 hover:scale-110 transition-transform" data-color="bg-blue-200" title="Azul"></button>
+                        <button class="color-btn w-3.5 h-3.5 rounded-full bg-green-200 border border-black/20 hover:scale-110 transition-transform" data-color="bg-green-200" title="Verde"></button>
+                        <button class="color-btn w-3.5 h-3.5 rounded-full bg-pink-200 border border-black/20 hover:scale-110 transition-transform" data-color="bg-pink-200" title="Rosa"></button>
+                        <button class="color-btn w-3.5 h-3.5 rounded-full bg-purple-200 border border-black/20 hover:scale-110 transition-transform" data-color="bg-purple-200" title="Púrpura"></button>
+                    </div>
+                    <div class="flex gap-2 items-center">
+                        <button class="ai-analyze-btn text-indigo-500 hover:text-indigo-700 transition-colors opacity-0 group-hover:opacity-100 font-bold" title="Clasificar con IA">
+                            ✨
+                        </button>
+                        <button class="delete-btn text-black/30 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100" title="Eliminar idea">
+                            <i class="fas fa-times text-xs"></i>
+                        </button>
+                    </div>
+                </div>
+                <textarea class="w-full flex-grow bg-transparent border-none outline-none resize-none text-slate-800 text-sm font-semibold p-2.5 placeholder-black/30" placeholder="Escribe una idea...">${text}</textarea>
+            `;
+
+            // EVENTO IA EVALUAR
+            const aiBtn = note.querySelector('.ai-analyze-btn');
+            const textarea = note.querySelector('textarea');
+            aiBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+            aiBtn.addEventListener('click', () => autoEvaluateNote(note, textarea, aiBtn));
+
+            // CAMBIO DE COLORES
+            const colorButtons = note.querySelectorAll('.color-btn');
+            colorButtons.forEach(btn => {
+                btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+                btn.addEventListener('click', (e) => {
+                    const newColor = e.target.getAttribute('data-color');
+                    note.classList.remove('bg-yellow-200', 'bg-blue-200', 'bg-green-200', 'bg-pink-200', 'bg-purple-200');
+                    note.classList.add(newColor);
+                });
+            });
+
+            // LÓGICA ELIMINAR
+            const deleteBtn = note.querySelector('.delete-btn');
+            deleteBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+            deleteBtn.addEventListener('click', () => {
+                note.style.transform = 'scale(0)';
+                note.style.opacity = '0';
+                setTimeout(() => note.remove(), 200);
+            });
+
+            // LÓGICA DE ARRASTRE
+            const toolbar = note.querySelector('.note-toolbar');
+            let isDragging = false;
+            let startX, startY, initialLeft, initialTop;
+
+            toolbar.addEventListener('pointerdown', (e) => {
+                if (e.target.closest('button')) return;
+
+                isDragging = true;
+                note.classList.add('dragging'); // Remueve transition temporalmente para seguir el mouse exacto
+                note.style.zIndex = ++zIndexCounter;
+                toolbar.classList.replace('cursor-grab', 'cursor-grabbing');
+                note.style.boxShadow = '5px 8px 20px rgba(0, 0, 0, 0.3)';
+
+                // Reseteamos el transform:translate aleatorio si existía y lo convertimos a absolute real
+                const style = window.getComputedStyle(note);
+                const matrix = new DOMMatrixReadOnly(style.transform);
+                if (matrix.m41 !== 0 || matrix.m42 !== 0) {
+                     note.style.left = `${parseFloat(note.style.left || 0) + matrix.m41}px`;
+                     note.style.top = `${parseFloat(note.style.top || 0) + matrix.m42}px`;
+                     note.style.transform = 'none';
+                }
+
+                startX = e.clientX;
+                startY = e.clientY;
+                initialLeft = parseFloat(note.style.left) || 0;
+                initialTop = parseFloat(note.style.top) || 0;
+                
+                toolbar.setPointerCapture(e.pointerId);
+            });
+
+            toolbar.addEventListener('pointermove', (e) => {
+                if (!isDragging) return;
+                const dx = e.clientX - startX;
+                const dy = e.clientY - startY;
+                note.style.left = `${initialLeft + dx}px`;
+                note.style.top = `${initialTop + dy}px`;
+            });
+
+            toolbar.addEventListener('pointerup', (e) => {
+                isDragging = false;
+                note.classList.remove('dragging');
+                toolbar.classList.replace('cursor-grabbing', 'cursor-grab');
+                note.style.boxShadow = '3px 4px 10px rgba(0, 0, 0, 0.2)';
+                toolbar.releasePointerCapture(e.pointerId);
+            });
+
+            // Foco
+            textarea.addEventListener('mousedown', () => {
+                note.style.zIndex = ++zIndexCounter;
+            });
+
+            notesLayer.appendChild(note);
+        }
+
+        // EXPORTACIÓN A PDF LIMPIO
+        function exportToPDF() {
+            const canvas = document.getElementById('pdf-canvas');
+            canvas.classList.add('exporting');
+
+            const opt = {
+                margin:       0,
+                filename:     'Matriz_Priorizacion_Equipo.pdf',
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true },
+                jsPDF:        { unit: 'px', format: [1122, 793], orientation: 'landscape' }
+            };
+
+            html2pdf().set(opt).from(canvas).save().then(() => {
+                canvas.classList.remove('exporting');
+            });
+        }
+
+        // Notas demo al arrancar
+        window.onload = () => {
+            setTimeout(() => {
+                addNote("Mudar la base de datos a la nube", 810, 220, "bg-blue-200");
+                addNote("Actualizar logo en redes sociales", 260, 220, "bg-yellow-200");
+            }, 300);
+        };
+    </script>
+</body>
+</html>
