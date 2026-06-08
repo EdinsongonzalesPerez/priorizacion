@@ -3,509 +3,499 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Matriz de Priorización Interactiva con IA</title>
+    <title>WonkUp - Matriz de Priorización</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Font Awesome -->
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <!-- html2pdf para exportar -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    
+    <script>
+        // Convertidor de seguridad para evitar fallos de CORS en el PDF
+        function convertImageToDataURL(imgElement) {
+            if (imgElement.src.startsWith('data:')) return;
+            const canvas = document.createElement('canvas');
+            canvas.width = imgElement.naturalWidth;
+            canvas.height = imgElement.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            try {
+                ctx.drawImage(imgElement, 0, 0);
+                imgElement.src = canvas.toDataURL('image/png');
+                imgElement.removeAttribute('crossorigin');
+            } catch (e) {
+                console.warn("Se activará el respaldo de texto para el logo:", e);
+            }
+        }
+
+        // Manejo ultra seguro de logos rotos o no encontrados
+        function handleImageError(imgElement, fallbackId) {
+            imgElement.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+            imgElement.classList.add('hidden');
+            const fallback = document.getElementById(fallbackId);
+            if (fallback) fallback.classList.remove('hidden');
+        }
+
+        // Mostrar texto de respaldo si el logo principal falla
+        function showTextLogoFallback() {
+            handleImageError(document.getElementById('header-logo'), 'text-logo-fallback');
+        }
+    </script>
     <style>
-        /* Estilos base para las notas */
-        .note {
-            position: absolute;
-            transition: transform 0.1s ease, box-shadow 0.1s ease, top 0.5s ease-in-out, left 0.5s ease-in-out;
-            box-shadow: 3px 4px 10px rgba(0, 0, 0, 0.2);
-            pointer-events: auto;
+        :root {
+            --wonkup-cielo: #50a8f3;
+            --wonkup-amarillo: #f1c22d;
         }
-        .note.dragging {
-            transition: transform 0.1s ease, box-shadow 0.1s ease; /* Sin delay de movimiento al arrastrar manualmente */
+        body { font-family: 'Inter', sans-serif; }
+
+        /* Estilo para simular hojas de post-its reales incrustadas y arrastrables */
+        .embedded-note {
+            position: relative;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            min-height: 80px;
+            display: flex;
+            flex-direction: column;
+            padding-top: 1.5rem; /* Espacio para la barra de herramientas */
+            cursor: grab;
         }
-        .note textarea {
-            font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif;
-            line-height: 1.4;
-            -ms-overflow-style: none;
-            scrollbar-width: none;
+        .embedded-note:active {
+            cursor: grabbing;
+            opacity: 0.8;
         }
-        .note textarea::-webkit-scrollbar {
-            display: none;
-        }
-        /* Patrón de cuadrícula de fondo */
-        .bg-grid {
-            background-size: 30px 30px;
-            background-image: 
-                linear-gradient(to right, rgba(0, 0, 0, 0.02) 1px, transparent 1px),
-                linear-gradient(to bottom, rgba(0, 0, 0, 0.02) 1px, transparent 1px);
-        }
-        /* Ocultar herramientas al exportar a PDF */
-        .exporting .note-toolbar, .exporting .no-print {
-            display: none !important;
-        }
-        .exporting textarea {
-            border: none !important;
-            resize: none !important;
+        .embedded-note:focus-within, .embedded-note:hover {
+            transform: scale(1.02);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
         }
         
-        /* Animaciones para el modal */
-        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-        .modal-bg { animation: fadeIn 0.2s ease-out forwards; }
-        .modal-content { animation: slideUp 0.3s ease-out forwards; }
+        .embedded-note textarea {
+            font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif;
+            line-height: 1.4;
+            resize: none;
+            overflow: hidden;
+        }
+
+        /* Barra de herramientas flotante absoluta */
+        .note-toolbar {
+            position: absolute;
+            top: 4px;
+            left: 8px;
+            right: 8px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            pointer-events: none;
+        }
+        .embedded-note:hover .note-toolbar, .embedded-note:focus-within .note-toolbar {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        /* Destacar contenedor durante arrastre sobre él */
+        .quadrant-drop-zone.dragover {
+            border-color: #50a8f3 !important;
+            background-color: rgba(80, 168, 243, 0.05);
+            box-shadow: inset 0 0 12px rgba(80, 168, 243, 0.15);
+        }
+
+        /* Cuadrícula de fondo limpia */
+        .bg-grid {
+            background-size: 20px 20px;
+            background-image: 
+                linear-gradient(to right, rgba(80, 168, 243, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(80, 168, 243, 0.03) 1px, transparent 1px);
+        }
+
+        /* Ajustes de exportación compacta de PDF */
+        .exporting .no-print {
+            display: none !important;
+        }
+        .exporting .embedded-note {
+            box-shadow: none !important;
+            border: 1.5px solid rgba(0, 0, 0, 0.15) !important;
+            padding-top: 0.25rem !important;
+            min-height: 50px !important;
+        }
+        .exporting .embedded-note textarea {
+            padding-top: 0 !important;
+        }
+        .exporting .note-toolbar {
+            display: none !important;
+        }
+        
+        /* Colores de post-it fijos y contrastados para el PDF */
+        .exporting .bg-yellow-100 { background-color: #fef08a !important; }
+        .exporting .bg-blue-100 { background-color: #93c5fd !important; }
+        .exporting .bg-green-100 { background-color: #86efac !important; }
+        .exporting .bg-rose-100 { background-color: #f9a8d4 !important; }
+        .exporting .bg-purple-100 { background-color: #c084fc !important; }
     </style>
 </head>
-<body class="bg-slate-800 h-screen flex flex-col font-sans overflow-hidden text-slate-800">
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col overflow-x-hidden">
 
-    <!-- BARRA DE HERRAMIENTAS GLOBAL -->
-    <header class="bg-white px-6 py-4 flex justify-between items-center shadow-md z-50 flex-shrink-0 no-print">
-        <div>
-            <h1 class="text-2xl font-bold text-slate-800"><i class="fas fa-th-large text-emerald-600 mr-2"></i> Dinámica: Matriz de Priorización</h1>
-            <p class="text-sm text-slate-500">Evalúa tus ideas según el Impacto que generan y el Esfuerzo que requieren.</p>
+    <!-- CABECERA GLOBAL (No se imprime) -->
+    <header class="bg-white border-b border-slate-200 px-6 py-4 flex flex-col sm:flex-row justify-between items-center gap-4 shadow-sm z-50 no-print">
+        <div class="flex items-center gap-3">
+            <!-- Logo oficial de WonkUp -->
+            <img id="header-logo" crossorigin="anonymous" src="logo_wonkup.png" onload="convertImageToDataURL(this)" alt="WonkUp" class="h-10 w-auto object-contain" onerror="showTextLogoFallback()">
+            
+            <!-- Respaldo de seguridad si el logo no carga en GitHub -->
+            <div id="text-logo-fallback" class="hidden flex items-center gap-2">
+                <div class="bg-[#f1c22d] text-slate-900 px-2 py-1 rounded font-black text-sm">W</div>
+                <h1 class="text-xl font-black text-[#50a8f3]">WONK<span class="text-[#f1c22d]">UP</span></h1>
+            </div>
+            
+            <div class="border-l border-slate-200 pl-3 hidden md:block">
+                <span class="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">Matriz de Priorización</span>
+            </div>
         </div>
-        <div class="flex gap-3">
-            <button onclick="openBrainstormModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-4 rounded shadow transition-colors flex items-center gap-2">
-                <span class="text-xl">✨</span> Lluvia de Ideas
-            </button>
-            <button onclick="addNote()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-semibold py-2 px-4 rounded shadow transition-colors flex items-center gap-2">
-                <i class="fas fa-plus"></i> Añadir Idea
-            </button>
-            <button onclick="exportToPDF()" class="bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 font-semibold py-2 px-4 rounded shadow-sm transition-colors flex items-center gap-2">
-                <i class="fas fa-file-pdf text-red-500"></i> Descargar PDF
+        
+        <div class="flex items-center gap-3 w-full sm:w-auto justify-end">
+            <button onclick="exportToPDF()" class="w-full sm:w-auto bg-[#50a8f3] hover:bg-[#3fa0f1] text-white font-semibold py-2 px-5 rounded-lg shadow-sm transition-colors flex items-center justify-center gap-2">
+                <i class="fas fa-file-pdf"></i> Descargar PDF
             </button>
         </div>
     </header>
 
-    <!-- ÁREA DE TRABAJO -->
-    <main class="flex-grow overflow-auto p-8 flex justify-center items-start">
+    <!-- CONTENEDOR CENTRAL -->
+    <main class="flex-grow p-4 lg:p-8 flex justify-center items-start">
         
-        <div id="pdf-canvas" class="bg-white relative shadow-2xl flex flex-col" style="width: 1122px; height: 793px; min-width: 1122px; min-height: 793px;">
+        <!-- LIENZO DE TRABAJO -->
+        <div id="pdf-canvas" class="bg-white w-full max-w-[1200px] rounded-2xl shadow-xl border border-slate-200 flex flex-col p-6 sm:p-8 transition-all relative">
             
-            <div class="px-8 py-6 border-b-2 border-slate-200 flex justify-between items-start bg-white z-10 relative">
-                <div>
-                    <h2 class="text-3xl font-extrabold text-slate-800 uppercase tracking-wide">Matriz de Priorización de Ideas</h2>
-                    <p class="text-slate-500 mt-1">¿Qué ideas debemos implementar primero? (Impacto vs Esfuerzo)</p>
-                </div>
-                <div class="w-1/3">
-                    <label class="block text-sm font-bold text-slate-700 mb-1"><i class="fas fa-users mr-1"></i> Integrantes del Equipo:</label>
-                    <input type="text" class="w-full border-b-2 border-slate-300 bg-slate-50 p-2 outline-none focus:border-emerald-500 transition-colors" placeholder="Ej: Ana López, Carlos Ruiz...">
-                </div>
-            </div>
-
-            <div class="flex-grow grid grid-cols-2 grid-rows-2 bg-grid z-10 relative p-6 pl-20 pb-20 gap-4">
+            <!-- INFORMACIÓN DEL PROYECTO (Compacta e Integrada) -->
+            <div class="flex flex-col lg:flex-row justify-between items-center gap-4 pb-4 mb-4 border-b-2 border-slate-100 w-full relative z-30">
                 
-                <!-- EJE Y (Vertical - Impacto) -->
-                <div class="absolute left-10 top-6 bottom-10 w-1 bg-slate-400 pointer-events-none z-20 flex flex-col items-center justify-center">
-                    <i class="fas fa-caret-up text-slate-400 text-4xl absolute -top-[17px] leading-none"></i>
-                    <div class="absolute -top-4 left-4 text-4xl font-black text-slate-400">+</div>
-                    <div class="absolute -rotate-90 origin-center text-lg font-extrabold text-slate-500 tracking-widest uppercase bg-white/90 px-4 py-1 rounded-full shadow-sm border border-slate-100">Impacto</div>
-                    <div class="absolute bottom-4 left-4 text-5xl font-black text-slate-400">-</div>
+                <!-- Izquierda: Título de la actividad más pequeño para evitar superposiciones -->
+                <div class="text-center lg:text-left lg:w-1/4">
+                    <h2 class="text-lg md:text-xl font-black text-slate-800 flex items-center justify-center lg:justify-start gap-1.5 uppercase tracking-wide">
+                        <span class="text-[#50a8f3]">MATRIZ DE</span> <span class="text-[#f1c22d]">PRIORIZACIÓN</span>
+                    </h2>
                 </div>
 
-                <!-- EJE X (Horizontal - Esfuerzo) -->
-                <div class="absolute left-10 bottom-10 right-6 h-1 bg-slate-400 pointer-events-none z-20 flex items-center justify-center">
-                    <i class="fas fa-caret-right text-slate-400 text-4xl absolute -right-[13px] leading-none"></i>
-                    <div class="absolute left-4 bottom-4 text-5xl font-black text-slate-400">-</div>
-                    <div class="text-lg font-extrabold text-slate-500 tracking-widest uppercase bg-white/90 px-4 py-1 rounded-full shadow-sm border border-slate-100 z-10">Esfuerzo</div>
-                    <div class="absolute right-4 bottom-4 text-4xl font-black text-slate-400">+</div>
-                </div>
-
-                <!-- CUADRANTE 1: Alto Impacto / Bajo Esfuerzo -->
-                <div class="rounded-xl border-2 border-dashed border-emerald-200 bg-emerald-50/40 relative overflow-hidden flex items-center justify-center">
-                    <div class="text-center opacity-[0.15] pointer-events-none select-none">
-                        <i class="fas fa-bolt text-6xl mb-3 text-emerald-800"></i>
-                        <h3 class="text-4xl font-black text-emerald-900 uppercase tracking-widest">Hacer Ya</h3>
-                        <p class="text-lg font-bold text-emerald-800 mt-1 uppercase tracking-widest">Éxitos Rápidos</p>
+                <!-- Centro: Inputs de Usuario/Target y Equipo (TEAM/IDEA) -->
+                <div class="flex flex-col sm:flex-row gap-4 w-full lg:w-2/4 justify-center items-center">
+                    <div class="w-full max-w-xs text-center font-semibold">
+                        <label class="block text-[10px] font-extrabold text-[#50a8f3] uppercase tracking-wider mb-0.5"><i class="fas fa-lightbulb mr-1"></i> Idea:</label>
+                        <input type="text" class="w-full border-b border-slate-200 bg-slate-50/50 p-1.5 text-xs rounded outline-none focus:border-[#50a8f3] text-center font-semibold text-slate-700 transition-all focus:bg-white" placeholder="Ej: Proyecto de reciclaje escolar...">
+                    </div>
+                    <div class="w-full max-w-xs text-center font-semibold">
+                        <label class="block text-[10px] font-extrabold text-[#f1c22d] uppercase tracking-wider mb-0.5"><i class="fas fa-users mr-1"></i> Team:</label>
+                        <input type="text" class="w-full border-b border-slate-200 bg-slate-50/50 p-1.5 text-xs rounded outline-none focus:border-[#f1c22d] text-center font-semibold text-slate-700 transition-all focus:bg-white" placeholder="Escribe los nombres...">
                     </div>
                 </div>
 
-                <!-- CUADRANTE 2: Alto Impacto / Alto Esfuerzo -->
-                <div class="rounded-xl border-2 border-dashed border-blue-200 bg-blue-50/40 relative overflow-hidden flex items-center justify-center">
-                    <div class="text-center opacity-[0.15] pointer-events-none select-none">
-                        <i class="fas fa-hourglass-half text-6xl mb-3 text-blue-800"></i>
-                        <h3 class="text-4xl font-black text-blue-900 uppercase tracking-widest">Planificar</h3>
-                        <p class="text-lg font-bold text-blue-800 mt-1 uppercase tracking-widest">Grandes Proyectos</p>
+                <!-- Derecha: Logo de WonkUp para impresión sin textos adicionales -->
+                <div class="flex flex-col items-center lg:items-end lg:w-1/4 flex-shrink-0">
+                    <img id="pdf-logo" crossorigin="anonymous" src="logo_wonkup.png" onload="convertImageToDataURL(this)" alt="WonkUp" class="h-8 w-auto object-contain" onerror="handleImageError(this, 'pdf-text-logo')">
+                    <div id="pdf-text-logo" class="hidden text-right">
+                        <span class="text-xs font-black text-[#50a8f3]">WONK<span class="text-[#f1c22d]">UP</span></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ÁREA CARTESIANA CON EJES SUPERPUESTOS -->
+            <div class="flex-grow relative bg-grid rounded-xl p-2 min-h-[520px]">
+                
+                <!-- EJE DE DESEABILIDAD (Vertical) con + arriba y - abajo -->
+                <div class="absolute left-6 top-6 bottom-10 w-1 bg-[#50a8f3]/30 pointer-events-none z-20 flex flex-col items-center justify-between">
+                    <div class="bg-[#50a8f3] text-white text-[11px] font-black px-2 py-0.5 rounded shadow-sm flex items-center gap-1 uppercase tracking-wide -mt-2">
+                        ▲ +
+                    </div>
+                    <!-- Label Central del Eje vertical -->
+                    <div class="text-[#50a8f3] font-black text-xs uppercase tracking-widest transform -rotate-90 origin-center bg-white px-2 py-1 border border-slate-200 rounded whitespace-nowrap">
+                        Deseabilidad
+                    </div>
+                    <div class="bg-slate-300 text-slate-600 text-[11px] font-black px-2 py-0.5 rounded shadow-sm flex items-center gap-1 uppercase tracking-wide -mb-2">
+                        ▼ -
                     </div>
                 </div>
 
-                <!-- CUADRANTE 3: Bajo Impacto / Bajo Esfuerzo -->
-                <div class="rounded-xl border-2 border-dashed border-yellow-200 bg-yellow-50/40 relative overflow-hidden flex items-center justify-center">
-                    <div class="text-center opacity-[0.15] pointer-events-none select-none">
-                        <i class="fas fa-folder-open text-6xl mb-3 text-yellow-800"></i>
-                        <h3 class="text-4xl font-black text-yellow-900 uppercase tracking-widest">Completar</h3>
-                        <p class="text-lg font-bold text-yellow-800 mt-1 uppercase tracking-widest">Tareas de Relleno</p>
+                <!-- EJE DE FACTIBILIDAD (Horizontal) con - a la izquierda y + a la derecha -->
+                <div class="absolute left-10 bottom-6 right-6 h-1 bg-[#f1c22d]/30 pointer-events-none z-20 flex items-center justify-between">
+                    <div class="bg-slate-300 text-slate-600 text-[11px] font-black px-2 py-0.5 rounded shadow-sm flex items-center gap-1 uppercase tracking-wide -ml-4">
+                        ◀ -
+                    </div>
+                    <!-- Label Central del Eje horizontal -->
+                    <div class="text-[#f1c22d] font-black text-xs uppercase tracking-widest bg-white px-3 py-1 border border-slate-200 rounded">
+                        Factibilidad
+                    </div>
+                    <div class="bg-[#f1c22d] text-slate-800 text-[11px] font-black px-2 py-0.5 rounded shadow-sm flex items-center gap-1 uppercase tracking-wide -mr-4">
+                        ▶ +
                     </div>
                 </div>
 
-                <!-- CUADRANTE 4: Bajo Impacto / Alto Esfuerzo -->
-                <div class="rounded-xl border-2 border-dashed border-red-200 bg-red-50/40 relative overflow-hidden flex items-center justify-center">
-                    <div class="text-center opacity-[0.15] pointer-events-none select-none">
-                        <i class="fas fa-trash-alt text-6xl mb-3 text-red-800"></i>
-                        <h3 class="text-4xl font-black text-red-900 uppercase tracking-widest">Descartar</h3>
-                        <p class="text-lg font-bold text-red-800 mt-1 uppercase tracking-widest">Pérdidas de Tiempo</p>
+                <!-- CUADRÍCULA 2x2 DE LOS CUADRANTES DE PRIORIZACIÓN -->
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 pl-14 pb-12 pr-4 pt-4 min-h-[460px]">
+                    
+                    <!-- 1. INVESTIGAR (Alta Deseabilidad / Baja Factibilidad [-]) -->
+                    <div class="bg-white border-2 border-slate-200 rounded-xl p-4 flex flex-col justify-between min-h-[220px] transition-all shadow-sm relative quadrant-drop-zone" id="quadrant-investigar" ondragover="allowDrop(event)" ondragleave="dragLeave(event)" ondrop="handleDrop(event, 'container-investigar')">
+                        <div>
+                            <div class="flex justify-between items-start mb-2 mr-16">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-2xl">🕵️</span>
+                                    <div>
+                                        <h3 class="font-extrabold text-slate-800 text-xs uppercase tracking-wider">Investigar</h3>
+                                        <p class="text-[9px] text-slate-400">Muy deseable, pero difícil de implementar hoy.</p>
+                                    </div>
+                                </div>
+                                <button onclick="addInlineNote('container-investigar', 'bg-blue-100')" class="no-print text-[10px] bg-[#50a8f3]/10 hover:bg-[#50a8f3] text-[#50a8f3] hover:text-white font-bold py-1 px-2 rounded-full transition-all flex items-center gap-1">
+                                    <i class="fas fa-plus text-[8px]"></i> Nota
+                                </button>
+                            </div>
+                            <div id="container-investigar" class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 min-h-[110px]">
+                                <!-- Aquí se inyectan las notas -->
+                            </div>
+                        </div>
                     </div>
+
+                    <!-- 2. IMPLEMENTAR (Alta Deseabilidad / Alta Factibilidad [+]) -->
+                    <div class="bg-white border-2 border-slate-200 rounded-xl p-4 flex flex-col justify-between min-h-[220px] transition-all shadow-sm relative quadrant-drop-zone" id="quadrant-implementar" ondragover="allowDrop(event)" ondragleave="dragLeave(event)" ondrop="handleDrop(event, 'container-implementar')">
+                        <div>
+                            <div class="flex justify-between items-start mb-2 mr-16">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-2xl">⚡</span>
+                                    <div>
+                                        <h3 class="font-extrabold text-emerald-800 text-xs uppercase tracking-wider">Implementar</h3>
+                                        <p class="text-[9px] text-slate-400">Muy deseable y fácil de construir.</p>
+                                    </div>
+                                </div>
+                                <button onclick="addInlineNote('container-implementar', 'bg-green-100')" class="no-print text-[10px] bg-emerald-500/10 hover:bg-emerald-500 text-emerald-600 hover:text-white font-bold py-1 px-2 rounded-full transition-all flex items-center gap-1">
+                                    <i class="fas fa-plus text-[8px]"></i> Nota
+                                </button>
+                            </div>
+                            <div id="container-implementar" class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 min-h-[110px]">
+                                <!-- Aquí se inyectan las notas -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 3. DESCARTAR (Baja Deseabilidad / Baja Factibilidad [-]) -->
+                    <div class="bg-white border-2 border-slate-200 rounded-xl p-4 flex flex-col justify-between min-h-[220px] transition-all shadow-sm relative quadrant-drop-zone" id="quadrant-descartar" ondragover="allowDrop(event)" ondragleave="dragLeave(event)" ondrop="handleDrop(event, 'container-descartar')">
+                        <div>
+                            <div class="flex justify-between items-start mb-2 mr-16">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-2xl">🗑️</span>
+                                    <div>
+                                        <h3 class="font-extrabold text-rose-800 text-xs uppercase tracking-wider">Descartar</h3>
+                                        <p class="text-[9px] text-slate-400">Poco deseable y muy difícil de realizar.</p>
+                                    </div>
+                                </div>
+                                <button onclick="addInlineNote('container-descartar', 'bg-rose-100')" class="no-print text-[10px] bg-rose-500/10 hover:bg-rose-500 text-rose-600 hover:text-white font-bold py-1 px-2 rounded-full transition-all flex items-center gap-1">
+                                    <i class="fas fa-plus text-[8px]"></i> Nota
+                                </button>
+                            </div>
+                            <div id="container-descartar" class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 min-h-[110px]">
+                                <!-- Aquí se inyectan las notas -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 4. VALIDAR (Baja Deseabilidad / Alta Factibilidad [+]) -->
+                    <div class="bg-white border-2 border-slate-200 rounded-xl p-4 flex flex-col justify-between min-h-[220px] transition-all shadow-sm relative quadrant-drop-zone" id="quadrant-validar" ondragover="allowDrop(event)" ondragleave="dragLeave(event)" ondrop="handleDrop(event, 'container-validar')">
+                        <div>
+                            <div class="flex justify-between items-start mb-2 mr-16">
+                                <div class="flex items-center gap-2">
+                                    <span class="text-2xl">🧪</span>
+                                    <div>
+                                        <h3 class="font-extrabold text-amber-800 text-xs uppercase tracking-wider">Validar</h3>
+                                        <p class="text-[9px] text-slate-400">Es fácil de hacer, pero no sabemos si lo quieren.</p>
+                                    </div>
+                                </div>
+                                <button onclick="addInlineNote('container-validar', 'bg-yellow-100')" class="no-print text-[10px] bg-amber-500/10 hover:bg-amber-500 text-amber-600 hover:text-white font-bold py-1 px-2 rounded-full transition-all flex items-center gap-1">
+                                    <i class="fas fa-plus text-[8px]"></i> Nota
+                                </button>
+                            </div>
+                            <div id="container-validar" class="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3 min-h-[110px]">
+                                <!-- Aquí se inyectan las notas -->
+                            </div>
+                        </div>
+                    </div>
+
                 </div>
 
             </div>
 
-            <div id="notes-layer" class="absolute inset-0 z-50 pointer-events-none" style="overflow: visible;">
+            <!-- PIE DE PÁGINA EXCLUSIVO PARA EL PDF -->
+            <div class="hidden exporting flex justify-between items-center mt-4 pt-3 border-t border-slate-100 text-[10px] text-slate-400 font-semibold relative z-30">
+                <span>Generado con WonkUp Incubadora de Emprendimiento</span>
+                <span>www.wonkup.com</span>
             </div>
 
         </div>
     </main>
 
-    <!-- Modales UI (Personalizados para evitar usar alert() o prompt() bloqueantes) -->
-    <div id="custom-modal" class="hidden fixed inset-0 z-[100] modal-bg bg-slate-900/60 flex justify-center items-center backdrop-blur-sm">
-        <div class="modal-content bg-white rounded-xl shadow-2xl max-w-md w-full p-6 m-4 relative">
-            <button onclick="closeModal('custom-modal')" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button>
-            <h3 id="modal-title" class="text-xl font-bold text-slate-800 mb-2">Mensaje</h3>
-            <p id="modal-message" class="text-slate-600 mb-6"></p>
-            <div class="flex justify-end">
-                <button onclick="closeModal('custom-modal')" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-semibold py-2 px-6 rounded transition-colors">Cerrar</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal Lluvia de Ideas -->
-    <div id="brainstorm-modal" class="hidden fixed inset-0 z-[100] modal-bg bg-slate-900/60 flex justify-center items-center backdrop-blur-sm">
-        <div class="modal-content bg-white rounded-xl shadow-2xl max-w-lg w-full p-6 m-4 relative">
-            <button onclick="closeModal('brainstorm-modal')" class="absolute top-4 right-4 text-slate-400 hover:text-slate-600"><i class="fas fa-times"></i></button>
-            <h3 class="text-2xl font-bold text-indigo-700 mb-2 flex items-center gap-2"><span class="text-2xl">✨</span> Generar Ideas (IA)</h3>
-            <p class="text-slate-600 mb-4 text-sm">Describe brevemente el problema que quieres resolver o la meta de tu proyecto. La IA propondrá 4 ideas y las ubicará en la matriz.</p>
-            
-            <textarea id="brainstorm-input" rows="3" class="w-full border-2 border-slate-200 rounded-lg p-3 outline-none focus:border-indigo-500 transition-colors mb-4 resize-none" placeholder="Ej: Queremos mejorar la participación de los alumnos en clase..."></textarea>
-            
-            <div class="flex justify-end gap-2">
-                <button onclick="closeModal('brainstorm-modal')" class="bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold py-2 px-4 rounded transition-colors">Cancelar</button>
-                <button id="brainstorm-btn" onclick="runBrainstorm()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-2 px-6 rounded transition-colors flex items-center gap-2">
-                    <i class="fas fa-magic"></i> Generar
-                </button>
-            </div>
-        </div>
-    </div>
-
     <script>
-        // CONFIGURACIÓN API GEMINI
-        const apiKey = "AQ.Ab8RN6KpQ218hysnCjBjwQCyrX6luKqz_87SGMpuKj0ynv_oUA"; // Se inyecta en el entorno de ejecución
-        const geminiApiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
-
-        const notesLayer = document.getElementById('notes-layer');
-        let zIndexCounter = 100;
-
-        // POSICIONES APROXIMADAS DE LOS CUADRANTES
-        const quadrants = {
-            "ALTO_BAJO": { left: 260, top: 220 }, // 1. Hacer Ya (Alto Imp, Bajo Esf)
-            "ALTO_ALTO": { left: 810, top: 220 }, // 2. Planificar (Alto Imp, Alto Esf)
-            "BAJO_BAJO": { left: 260, top: 560 }, // 3. Tareas de relleno (Bajo Imp, Bajo Esf)
-            "BAJO_ALTO": { left: 810, top: 560 }  // 4. Descartar (Bajo Imp, Alto Esf)
-        };
-
-        // UI Modales
-        function showModal(title, message) {
-            document.getElementById('modal-title').innerText = title;
-            document.getElementById('modal-message').innerText = message;
-            document.getElementById('custom-modal').classList.remove('hidden');
-        }
-        function closeModal(modalId) {
-            document.getElementById(modalId).classList.add('hidden');
-            if(modalId === 'brainstorm-modal') document.getElementById('brainstorm-input').value = '';
-        }
-        function openBrainstormModal() {
-            document.getElementById('brainstorm-modal').classList.remove('hidden');
-            document.getElementById('brainstorm-input').focus();
+        function allowDrop(ev) {
+            ev.preventDefault();
+            const zone = ev.currentTarget;
+            zone.classList.add('dragover');
         }
 
-        // LÓGICA RETRY API (Exponential Backoff)
-        async function fetchWithRetry(url, payload, retries = 5) {
-            const delays = [1000, 2000, 4000, 8000, 16000];
-            for (let i = 0; i < retries; i++) {
-                try {
-                    const response = await fetch(url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(payload)
-                    });
-                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-                    return await response.json();
-                } catch (error) {
-                    if (i === retries - 1) throw error;
-                    await new Promise(res => setTimeout(res, delays[i]));
-                }
-            }
+        function dragLeave(ev) {
+            const zone = ev.currentTarget;
+            zone.classList.remove('dragover');
         }
 
-        // FUNCIÓN: LLUVIA DE IDEAS (✨)
-        async function runBrainstorm() {
-            const input = document.getElementById('brainstorm-input').value.trim();
-            if (!input) return showModal('Error', 'Por favor, escribe un problema o meta para generar ideas.');
+        function handleDragStart(ev) {
+            ev.dataTransfer.setData("text/plain", ev.target.id);
+        }
+
+        function handleDrop(ev, targetContainerId) {
+            ev.preventDefault();
+            const zone = ev.currentTarget;
+            zone.classList.remove('dragover');
             
-            const btn = document.getElementById('brainstorm-btn');
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Pensando...';
-            btn.disabled = true;
-
-            const prompt = `Actúa como un experto en innovación. El problema o meta es: "${input}". 
-            Genera exactamente 4 ideas creativas y accionables para abordarlo.
-            Para cada idea, evalúa su IMPACTO (ALTO o BAJO) y su ESFUERZO/Costo de implementación (ALTO o BAJO).
-            Asegúrate de que haya diversidad en los cuadrantes si es posible.`;
-
-            const payload = {
-                contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: "OBJECT",
-                        properties: {
-                            ideas: {
-                                type: "ARRAY",
-                                items: {
-                                    type: "OBJECT",
-                                    properties: {
-                                        texto: { type: "STRING" },
-                                        impacto: { type: "STRING", enum: ["ALTO", "BAJO"] },
-                                        esfuerzo: { type: "STRING", enum: ["ALTO", "BAJO"] }
-                                    },
-                                    required: ["texto", "impacto", "esfuerzo"]
-                                }
-                            }
-                        },
-                        required: ["ideas"]
-                    }
-                }
-            };
-
-            try {
-                const data = await fetchWithRetry(geminiApiUrl, payload);
-                const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (!resultText) throw new Error("Respuesta vacía de la API");
-                
-                const resultObj = JSON.parse(resultText);
-                closeModal('brainstorm-modal');
-
-                // Colores predeterminados para las 4 ideas generadas
-                const colors = ['bg-yellow-200', 'bg-blue-200', 'bg-pink-200', 'bg-purple-200'];
-
-                resultObj.ideas.forEach((idea, index) => {
-                    setTimeout(() => {
-                        const quadKey = `${idea.impacto}_${idea.esfuerzo}`;
-                        const pos = quadrants[quadKey] || quadrants["ALTO_BAJO"];
-                        
-                        // Agregar nota con su respectivo color y posición
-                        addNote(idea.texto, pos.left, pos.top, colors[index % colors.length]);
-                    }, index * 400); // Añadir pequeño retraso para efecto visual
-                });
-
-            } catch (error) {
-                console.error("Error AI:", error);
-                showModal('Ups...', 'Hubo un problema al contactar con la inteligencia artificial. Inténtalo de nuevo.');
-            } finally {
-                btn.innerHTML = '<i class="fas fa-magic"></i> Generar';
-                btn.disabled = false;
-            }
-        }
-
-        // FUNCIÓN: AUTO-EVALUAR NOTA (✨)
-        async function autoEvaluateNote(noteEl, textarea, aiBtn) {
-            const text = textarea.value.trim();
-            if (!text) return showModal('Nota vacía', 'Escribe una idea en la nota antes de pedirle a la IA que la evalúe.');
-
-            aiBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-            aiBtn.disabled = true;
-
-            const prompt = `Lee esta idea de proyecto/tarea: "${text}".
-            Clasifícala estrictamente en una matriz de priorización evaluando su IMPACTO (ALTO o BAJO) y el ESFUERZO/Complejidad para realizarla (ALTO o BAJO).
-            Brinda también una razón muy corta (1 frase) del por qué.`;
-
-            const payload = {
-                contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    responseSchema: {
-                        type: "OBJECT",
-                        properties: {
-                            impacto: { type: "STRING", enum: ["ALTO", "BAJO"] },
-                            esfuerzo: { type: "STRING", enum: ["ALTO", "BAJO"] },
-                            razon: { type: "STRING" }
-                        },
-                        required: ["impacto", "esfuerzo", "razon"]
-                    }
-                }
-            };
-
-            try {
-                const data = await fetchWithRetry(geminiApiUrl, payload);
-                const resultText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-                if (!resultText) throw new Error("Respuesta vacía");
-
-                const result = JSON.parse(resultText);
-                
-                // Mover nota al cuadrante correcto
-                const quadKey = `${result.impacto}_${result.esfuerzo}`;
-                if (quadrants[quadKey]) {
-                    // Animamos al centroide del cuadrante con un poco de aleatoriedad
-                    const randomOffsetX = Math.floor(Math.random() * 80) - 40;
-                    const randomOffsetY = Math.floor(Math.random() * 60) - 30;
-                    
-                    // Aseguramos que CSS transitions se apliquen temporalmente
-                    noteEl.classList.remove('dragging');
-                    noteEl.style.left = `${quadrants[quadKey].left + randomOffsetX}px`;
-                    noteEl.style.top = `${quadrants[quadKey].top + randomOffsetY}px`;
-                    
-                    // Pequeño indicador de éxito visual en la nota
-                    textarea.value = `[IA: ${result.impacto} Imp / ${result.esfuerzo} Esf]\n${text}`;
-                }
-            } catch(error) {
-                console.error("Eval Error:", error);
-                showModal('Error de IA', 'No se pudo clasificar esta nota automáticamente.');
-            } finally {
-                aiBtn.innerHTML = '✨';
-                aiBtn.disabled = false;
-            }
-        }
-
-
-        // CREACIÓN DE NOTAS
-        function addNote(text = '', forceLeft = null, forceTop = null, forceColor = 'bg-yellow-200') {
-            const note = document.createElement('div');
-            note.className = `note ${forceColor} w-44 h-32 flex flex-col rounded border border-black/5`;
+            const noteId = ev.dataTransfer.getData("text/plain");
+            const noteElement = document.getElementById(noteId);
+            const targetContainer = document.getElementById(targetContainerId);
             
-            // Posicionar
-            if (forceLeft !== null && forceTop !== null) {
-                // Posición exacta dictada (usado por la IA de lluvia de ideas)
-                const randomOffset = Math.floor(Math.random() * 40) - 20; 
-                note.style.left = `${forceLeft + randomOffset}px`; 
-                note.style.top = `${forceTop + randomOffset}px`;
-            } else {
-                // Al centro por defecto (usuario manual)
-                const randomOffset = Math.floor(Math.random() * 60) - 30; 
-                note.style.left = `480px`; 
-                note.style.top = `350px`;
-                note.style.transform = `translate(${randomOffset}px, ${randomOffset}px)`;
+            if (noteElement && targetContainer) {
+                targetContainer.appendChild(noteElement);
+                // Actualizar el selector móvil para sincronizar el estado
+                const selectElement = noteElement.querySelector('.quadrant-selector');
+                if (selectElement) {
+                    selectElement.value = targetContainerId;
+                }
             }
-            note.style.zIndex = ++zIndexCounter;
+        }
 
-            note.innerHTML = `
-                <div class="note-toolbar w-full h-7 cursor-grab bg-black/5 flex justify-between items-center px-2 group">
-                    <div class="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button class="color-btn w-3.5 h-3.5 rounded-full bg-yellow-200 border border-black/20 hover:scale-110 transition-transform" data-color="bg-yellow-200" title="Amarillo"></button>
-                        <button class="color-btn w-3.5 h-3.5 rounded-full bg-blue-200 border border-black/20 hover:scale-110 transition-transform" data-color="bg-blue-200" title="Azul"></button>
-                        <button class="color-btn w-3.5 h-3.5 rounded-full bg-green-200 border border-black/20 hover:scale-110 transition-transform" data-color="bg-green-200" title="Verde"></button>
-                        <button class="color-btn w-3.5 h-3.5 rounded-full bg-pink-200 border border-black/20 hover:scale-110 transition-transform" data-color="bg-pink-200" title="Rosa"></button>
-                        <button class="color-btn w-3.5 h-3.5 rounded-full bg-purple-200 border border-black/20 hover:scale-110 transition-transform" data-color="bg-purple-200" title="Púrpura"></button>
+        // Mover post-it mediante el selector móvil (táctil / alternativo)
+        function moveNoteToContainer(noteId, targetContainerId) {
+            const noteElement = document.getElementById(noteId);
+            const targetContainer = document.getElementById(targetContainerId);
+            if (noteElement && targetContainer) {
+                noteElement.style.transform = "scale(0.8)";
+                noteElement.style.opacity = "0";
+                
+                setTimeout(() => {
+                    targetContainer.appendChild(noteElement);
+                    noteElement.style.transform = "scale(1)";
+                    noteElement.style.opacity = "1";
+                }, 150);
+            }
+        }
+
+        // Agregar nota integrada de manera natural (Arrastrable y Móvil amigable)
+        function addInlineNote(containerId, colorClass, initialText = '') {
+            const container = document.getElementById(containerId);
+            const noteId = 'note-' + Date.now() + Math.floor(Math.random() * 1000);
+            
+            const noteDiv = document.createElement('div');
+            noteDiv.id = noteId;
+            noteDiv.draggable = true;
+            noteDiv.addEventListener('dragstart', handleDragStart);
+            noteDiv.className = `embedded-note ${colorClass} rounded-xl p-3 border border-black/5 flex flex-col gap-1`;
+            
+            noteDiv.innerHTML = `
+                <div class="note-toolbar flex justify-between items-center pb-1 border-b border-black/5">
+                    <div class="flex gap-1 items-center">
+                        <!-- Selector de color -->
+                        <button onclick="changeNoteColor('${noteId}', 'bg-yellow-100')" class="w-3 h-3 rounded-full bg-yellow-200 border border-black/15" title="Amarillo"></button>
+                        <button onclick="changeNoteColor('${noteId}', 'bg-blue-100')" class="w-3 h-3 rounded-full bg-blue-200 border border-black/15" title="Cielo"></button>
+                        <button onclick="changeNoteColor('${noteId}', 'bg-green-100')" class="w-3 h-3 rounded-full bg-green-200 border border-black/15" title="Verde"></button>
+                        <button onclick="changeNoteColor('${noteId}', 'bg-rose-100')" class="w-3 h-3 rounded-full bg-rose-200 border border-black/15" title="Coral"></button>
+                        <button onclick="changeNoteColor('${noteId}', 'bg-purple-100')" class="w-3 h-3 rounded-full bg-purple-200 border border-black/15" title="Morado"></button>
                     </div>
-                    <div class="flex gap-2 items-center">
-                        <button class="ai-analyze-btn text-indigo-500 hover:text-indigo-700 transition-colors opacity-0 group-hover:opacity-100 font-bold" title="Clasificar con IA">
-                            ✨
-                        </button>
-                        <button class="delete-btn text-black/30 hover:text-red-600 transition-colors opacity-0 group-hover:opacity-100" title="Eliminar idea">
-                            <i class="fas fa-times text-xs"></i>
+                    <div class="flex gap-1.5 items-center">
+                        <!-- Selector de cuadrantes para Tablets y Celulares -->
+                        <div class="relative flex items-center bg-white/50 hover:bg-white border border-black/10 rounded px-1" title="Mover cuadrante">
+                            <i class="fas fa-arrows-alt text-[9px] text-slate-500 mr-1"></i>
+                            <select onchange="moveNoteToContainer('${noteId}', this.value)" class="quadrant-selector bg-transparent border-none text-[9px] font-bold text-slate-700 outline-none cursor-pointer p-0.5">
+                                <option value="container-investigar" ${containerId === 'container-investigar' ? 'selected' : ''}>Investigar</option>
+                                <option value="container-implementar" ${containerId === 'container-implementar' ? 'selected' : ''}>Implementar</option>
+                                <option value="container-descartar" ${containerId === 'container-descartar' ? 'selected' : ''}>Descartar</option>
+                                <option value="container-validar" ${containerId === 'container-validar' ? 'selected' : ''}>Validar</option>
+                            </select>
+                        </div>
+                        <button onclick="deleteInlineNote('${noteId}')" class="text-black/30 hover:text-red-500 transition-colors text-xs" title="Eliminar">
+                            <i class="fas fa-trash-can text-[10px]"></i>
                         </button>
                     </div>
                 </div>
-                <textarea class="w-full flex-grow bg-transparent border-none outline-none resize-none text-slate-800 text-sm font-semibold p-2.5 placeholder-black/30" placeholder="Escribe una idea...">${text}</textarea>
+                <textarea class="w-full flex-grow bg-transparent border-none outline-none text-slate-800 text-xs font-semibold placeholder-black/25" rows="1" placeholder="Escribe tu idea...">${initialText}</textarea>
             `;
+            
+            container.appendChild(noteDiv);
 
-            // EVENTO IA EVALUAR
-            const aiBtn = note.querySelector('.ai-analyze-btn');
-            const textarea = note.querySelector('textarea');
-            aiBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
-            aiBtn.addEventListener('click', () => autoEvaluateNote(note, textarea, aiBtn));
-
-            // CAMBIO DE COLORES
-            const colorButtons = note.querySelectorAll('.color-btn');
-            colorButtons.forEach(btn => {
-                btn.addEventListener('pointerdown', (e) => e.stopPropagation());
-                btn.addEventListener('click', (e) => {
-                    const newColor = e.target.getAttribute('data-color');
-                    note.classList.remove('bg-yellow-200', 'bg-blue-200', 'bg-green-200', 'bg-pink-200', 'bg-purple-200');
-                    note.classList.add(newColor);
-                });
+            // Ajustar altura automáticamente en base al texto para evitar espacios vacíos
+            const textarea = noteDiv.querySelector('textarea');
+            textarea.addEventListener('input', () => {
+                textarea.style.height = 'auto';
+                textarea.style.height = textarea.scrollHeight + 'px';
             });
 
-            // LÓGICA ELIMINAR
-            const deleteBtn = note.querySelector('.delete-btn');
-            deleteBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
-            deleteBtn.addEventListener('click', () => {
-                note.style.transform = 'scale(0)';
-                note.style.opacity = '0';
-                setTimeout(() => note.remove(), 200);
-            });
-
-            // LÓGICA DE ARRASTRE
-            const toolbar = note.querySelector('.note-toolbar');
-            let isDragging = false;
-            let startX, startY, initialLeft, initialTop;
-
-            toolbar.addEventListener('pointerdown', (e) => {
-                if (e.target.closest('button')) return;
-
-                isDragging = true;
-                note.classList.add('dragging'); // Remueve transition temporalmente para seguir el mouse exacto
-                note.style.zIndex = ++zIndexCounter;
-                toolbar.classList.replace('cursor-grab', 'cursor-grabbing');
-                note.style.boxShadow = '5px 8px 20px rgba(0, 0, 0, 0.3)';
-
-                // Reseteamos el transform:translate aleatorio si existía y lo convertimos a absolute real
-                const style = window.getComputedStyle(note);
-                const matrix = new DOMMatrixReadOnly(style.transform);
-                if (matrix.m41 !== 0 || matrix.m42 !== 0) {
-                     note.style.left = `${parseFloat(note.style.left || 0) + matrix.m41}px`;
-                     note.style.top = `${parseFloat(note.style.top || 0) + matrix.m42}px`;
-                     note.style.transform = 'none';
-                }
-
-                startX = e.clientX;
-                startY = e.clientY;
-                initialLeft = parseFloat(note.style.left) || 0;
-                initialTop = parseFloat(note.style.top) || 0;
-                
-                toolbar.setPointerCapture(e.pointerId);
-            });
-
-            toolbar.addEventListener('pointermove', (e) => {
-                if (!isDragging) return;
-                const dx = e.clientX - startX;
-                const dy = e.clientY - startY;
-                note.style.left = `${initialLeft + dx}px`;
-                note.style.top = `${initialTop + dy}px`;
-            });
-
-            toolbar.addEventListener('pointerup', (e) => {
-                isDragging = false;
-                note.classList.remove('dragging');
-                toolbar.classList.replace('cursor-grabbing', 'cursor-grab');
-                note.style.boxShadow = '3px 4px 10px rgba(0, 0, 0, 0.2)';
-                toolbar.releasePointerCapture(e.pointerId);
-            });
-
-            // Foco
-            textarea.addEventListener('mousedown', () => {
-                note.style.zIndex = ++zIndexCounter;
-            });
-
-            notesLayer.appendChild(note);
+            // Ajustar altura inicial diferida para cuando se renderice el texto por defecto
+            setTimeout(() => {
+                textarea.style.height = 'auto';
+                textarea.style.height = textarea.scrollHeight + 'px';
+            }, 50);
         }
 
-        // EXPORTACIÓN A PDF LIMPIO
+        // Eliminar nota de manera suave
+        function deleteInlineNote(noteId) {
+            const note = document.getElementById(noteId);
+            if (note) {
+                note.style.transform = 'scale(0.9)';
+                note.style.opacity = '0';
+                setTimeout(() => note.remove(), 150);
+            }
+        }
+
+        // Cambiar el color de fondo del post-it
+        function changeNoteColor(noteId, newColorClass) {
+            const note = document.getElementById(noteId);
+            if (note) {
+                // Removemos cualquier clase bg- existente y añadimos la nueva
+                note.className = note.className.replace(/bg-\w+-\d+/g, newColorClass);
+            }
+        }
+
+        // Exportador de PDF robusto de hoja única
         function exportToPDF() {
             const canvas = document.getElementById('pdf-canvas');
             canvas.classList.add('exporting');
 
-            const opt = {
-                margin:       0,
-                filename:     'Matriz_Priorizacion_Equipo.pdf',
-                image:        { type: 'jpeg', quality: 0.98 },
-                html2canvas:  { scale: 2, useCORS: true },
-                jsPDF:        { unit: 'px', format: [1122, 793], orientation: 'landscape' }
-            };
+            // Pequeño retardo para dar tiempo a que se aplique la clase de exportación
+            setTimeout(() => {
+                let width = canvas.offsetWidth;
+                let height = canvas.offsetHeight;
 
-            html2pdf().set(opt).from(canvas).save().then(() => {
-                canvas.classList.remove('exporting');
-            });
+                // Fallback de seguridad por si el contenedor mide 0 en previsualizaciones
+                if (!width || width < 300) width = 1200;
+                if (!height || height < 300) height = 800;
+
+                // Convertir dimensiones a puntos de impresión (1px = 0.75pt)
+                const widthPt = width * 0.75;
+                const heightPt = height * 0.75;
+
+                // Decidir orientación de la hoja en tiempo real
+                const orientation = height > width ? 'p' : 'l';
+
+                const opt = {
+                    margin:       10,
+                    filename:     'Matriz_Priorizacion_WonkUp.pdf',
+                    image:        { type: 'jpeg', quality: 0.98 },
+                    html2canvas:  { scale: 2, useCORS: true, logging: false },
+                    // Formato exacto a la medida para garantizar que se imprima en UNA SOLA HOJA
+                    jsPDF:        { unit: 'pt', format: [widthPt, heightPt], orientation: orientation }
+                };
+
+                html2pdf().set(opt).from(canvas).save().then(() => {
+                    canvas.classList.remove('exporting');
+                }).catch(err => {
+                    console.error("Error al exportar PDF:", err);
+                    canvas.classList.remove('exporting');
+                });
+            }, 100);
         }
 
-        // Notas demo al arrancar
-        window.onload = () => {
+        // Cargar notas demostrativas al iniciar la web con colores de WonkUp
+        window.onload = function() {
             setTimeout(() => {
-                addNote("Mudar la base de datos a la nube", 810, 220, "bg-blue-200");
-                addNote("Actualizar logo en redes sociales", 260, 220, "bg-yellow-200");
+                addInlineNote('container-implementar', 'bg-green-100', "Crear una landing page sencilla para validar la propuesta de valor.");
+                addInlineNote('container-investigar', 'bg-blue-100', "Desarrollar un sistema de recomendación complejo con inteligencia artificial.");
+                addInlineNote('container-validar', 'bg-yellow-100', "Rediseñar todos los botones estéticos del menú de la app.");
+                addInlineNote('container-descartar', 'bg-rose-100', "Crear una base de datos física dedicada desde cero.");
             }, 300);
         };
     </script>
